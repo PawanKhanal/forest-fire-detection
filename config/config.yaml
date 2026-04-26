@@ -1,0 +1,29 @@
+# Forest Fire Detection Configuration
+
+data:
+  raw_path: "data/raw/"
+  processed_path: "data/processed/"
+  dataset_name: "elmadafri/the-wildfire-dataset"
+  
+model:
+  image_size: [224, 224]
+  batch_size: 32
+  epochs: 20
+  learning_rate: 0.001
+  validation_split: 0.2
+  
+sensor:
+  temp_threshold: 40.0
+  humidity_threshold: 30.0
+  port: "/dev/ttyUSB0"
+  baudrate: 9600
+  
+training:
+  early_stopping_patience: 5
+  reduce_lr_patience: 3
+  class_weight: "balanced"
+  
+paths:
+  model_save_path: "models/saved/"
+  logs_path: "logs/"
+  checkpoints_path: "models/checkpoints/"
