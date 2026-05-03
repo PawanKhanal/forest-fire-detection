@@ -1,0 +1,32 @@
+
+FOREST FIRE DETECTION SYSTEM - MODEL EVALUATION REPORT
+======================================================================
+
+Generated: /home/debian/Public/fypy_forest_fire_detection
+Output Directory: models/plots
+
+CNN IMAGE MODEL
+----------------------------------------------------------------------
+Accuracy:  0.7585
+Precision: 0.8067
+Recall:    0.7585
+F1-Score:  0.7608
+
+SENSOR MODEL (Random Forest)
+----------------------------------------------------------------------
+Accuracy:  0.9038
+Precision: 0.9038
+Recall:    0.9038
+F1-Score:  0.9038
+
+RECOMMENDATIONS
+----------------------------------------------------------------------
+1. CNN Model: Best for image-based fire detection with pixel-level features
+2. Sensor Model: Effective for rapid assessment using weather conditions
+3. Ensemble: Combine both models for robust predictions
+
+Generated Plots:
+  - confusion_matrices.png
+  - roc_curves.png
+  - precision_recall_curves.png
+  - metrics_comparison.png

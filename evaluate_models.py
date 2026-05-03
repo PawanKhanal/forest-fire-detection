@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
 from typing import Dict, Tuple, Any
+from sklearn.model_selection import train_test_split
 from sklearn.metrics import (
     confusion_matrix, roc_curve, auc, precision_recall_curve,
     classification_report, accuracy_score, precision_score,
@@ -15,8 +16,8 @@ import torch
 from torchvision import datasets, transforms
 import joblib
 
-from src.models.cnn_model_pytorch import ForestFireCNN
-from src.models.sensor_model import SensorFireRiskModel
+from models.cnn_model_pytorch import ForestFireCNN
+from models.sensor_model import SensorFireRiskModel
 from src.data.pytorch_dataset import ForestFireDataLoader
 
 # Set style
@@ -160,64 +161,49 @@ class ModelEvaluator:
         return metrics
     
     def evaluate_sensor_model(
-        self,
-        test_csv: str = 'data/sensor/forestfires.csv'
-    ) -> Dict[str, Any]:
+    self,
+    test_csv: str = 'data/sensor/forestfires.csv'
+) -> Dict[str, Any]:
         """
-        Evaluate sensor model on test data.
-        
-        Args:
-            test_csv: Path to test CSV with temperature, humidity, and fire labels
-            
-        Returns:
-            Dictionary with evaluation metrics
+        Evaluate sensor model on Portuguese Forest Fire data.
         """
         print("\n" + "="*70)
         print("SENSOR MODEL EVALUATION")
         print("="*70)
         
-        try:
-            import pandas as pd
-            
-            # Load and preprocess data
-            df = pd.read_csv(test_csv)
-            print(f"✓ Loaded sensor data from {test_csv}")
-            print(f"  Total samples: {len(df)}")
-            
-            # Extract features (assumes specific column names)
-            # Adjust these column names based on your CSV structure
-            X = df[['temp', 'RH']].values if 'temp' in df.columns else \
-                df[['temperature', 'humidity']].values
-            y = df['fire'].values if 'fire' in df.columns else \
-                df['Fire'].values
-            
-            print(f"  Features shape: {X.shape}")
-            print(f"  Labels: {np.unique(y)}")
-        except Exception as e:
-            print(f"✗ Error loading sensor data: {str(e)}")
-            print("  Using synthetic data for demonstration...")
-            
-            # Generate synthetic test data
-            np.random.seed(42)
-            X = np.random.uniform(
-                low=[-10, 10],
-                high=[50, 100],
-                size=(200, 2)
-            )
-            y = (X[:, 0] > 30) & (X[:, 1] < 50)
-            y = y.astype(int)
+        import pandas as pd
         
-        # Make predictions
-        predictions = []
-        probabilities = []
+        # Load data
+        df = pd.read_csv(test_csv)
+        print(f"✓ Loaded sensor data from {test_csv}")
+        print(f"  Total samples: {len(df)}")
         
-        for temp, humidity in X:
-            result = self.sensor_model.predict(temp, humidity)
-            predictions.append(result['fire_risk'])
-            probabilities.append(result['probability'])
+        # Extract features and labels
+        X = df[['temp', 'RH']].values
+        y = (df['area'] > 0).astype(int).values  # Binary: area > 0 = fire
         
-        predictions = np.array(predictions)
-        probabilities = np.array(probabilities)
+        print(f"  Fire cases: {y.sum()} ({y.mean()*100:.1f}%)")
+        print(f"  Non-fire: {len(y) - y.sum()} ({(1-y.mean())*100:.1f}%)")
+        
+        # Load model and scaler from saved dict
+        data = joblib.load(self.sensor_model_path)
+        model = data['model']
+        scaler = data['scaler']
+        
+        # Split data for honest evaluation (same split as training)
+        _, X_test, _, y_test = train_test_split(
+            X, y, test_size=0.2, random_state=42, stratify=y
+        )
+        
+        # Scale test features
+        X_scaled = scaler.transform(X_test)
+        
+        # Predict on held-out test set
+        predictions = model.predict(X_scaled)
+        probabilities = model.predict_proba(X_scaled)[:, 1]
+        
+        # Use test labels for evaluation
+        y = y_test
         
         # Calculate metrics
         accuracy = accuracy_score(y, predictions)
@@ -239,7 +225,7 @@ class ModelEvaluator:
             zero_division=0
         ))
         
-        metrics = {
+        return {
             'accuracy': accuracy,
             'precision': precision,
             'recall': recall,
@@ -248,8 +234,6 @@ class ModelEvaluator:
             'targets': y,
             'probabilities': probabilities
         }
-        
-        return metrics
     
     def plot_confusion_matrices(
         self,

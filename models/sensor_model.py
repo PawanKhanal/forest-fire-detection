@@ -1,10 +1,10 @@
 """ML model for sensor-based fire risk prediction."""
 
 import numpy as np
-import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
-from typing import Tuple, Dict, Any, Union
+from sklearn.preprocessing import StandardScaler
+from typing import Dict, Any
 import joblib
 
 class SensorFireRiskModel:
@@ -19,7 +19,9 @@ class SensorFireRiskModel:
         """
         self.model_type = model_type
         self.model = self._create_model()
+        self.scaler = StandardScaler()
         self.threshold = 0.5
+        self.is_fitted = False
         
     def _create_model(self):
         """Factory method to create the appropriate model."""
@@ -47,7 +49,9 @@ class SensorFireRiskModel:
         Returns:
             Self for method chaining
         """
-        self.model.fit(X, y)
+        X_scaled = self.scaler.fit_transform(X)
+        self.model.fit(X_scaled, y)
+        self.is_fitted = True
         return self
     
     def predict(self, temperature: float, humidity: float) -> Dict[str, Any]:
@@ -61,8 +65,12 @@ class SensorFireRiskModel:
         Returns:
             Dictionary with prediction results
         """
+        if not self.is_fitted:
+            raise ValueError("Model must be trained before prediction")
+        
         features = np.array([[temperature, humidity]])
-        probability = self.model.predict_proba(features)[0, 1]
+        features_scaled = self.scaler.transform(features)
+        probability = self.model.predict_proba(features_scaled)[0, 1]
         prediction = int(probability >= self.threshold)
         
         return {
@@ -93,12 +101,26 @@ class SensorFireRiskModel:
             return "CRITICAL"
     
     def save(self, filepath: str) -> None:
-        """Save trained model to disk."""
-        joblib.dump(self.model, filepath)
+        """Save trained model and scaler to disk."""
+        joblib.dump({
+            'model': self.model,
+            'scaler': self.scaler,
+            'model_type': self.model_type,
+            'is_fitted': self.is_fitted
+        }, filepath)
     
     @classmethod
     def load(cls, filepath: str) -> 'SensorFireRiskModel':
         """Load trained model from disk."""
-        instance = cls()
-        instance.model = joblib.load(filepath)
+        data = joblib.load(filepath)
+        
+        if isinstance(data, dict):
+            instance = cls(model_type=data.get('model_type', 'random_forest'))
+            instance.model = data['model']
+            instance.scaler = data.get('scaler', StandardScaler())
+            instance.is_fitted = data.get('is_fitted', True)
+        else:
+            instance = cls()
+            instance.model = data
+        
         return instance

@@ -8,7 +8,7 @@ from datetime import datetime
 import serial
 from pathlib import Path
 
-from src.models.sensor_model import SensorFireRiskModel
+from models.sensor_model import SensorFireRiskModel
 from src.inference.predictor import FirePredictionSystem, SensorPredictionInput
 
 

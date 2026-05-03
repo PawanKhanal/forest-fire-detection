@@ -12,8 +12,9 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 from PIL import Image
 
-from ..models.cnn_model_pytorch import ForestFireCNN
-from ..models.sensor_model import SensorFireRiskModel
+from models.cnn_model_pytorch import ForestFireCNN
+from models.sensor_model import SensorFireRiskModel
+
 
 
 @dataclass
