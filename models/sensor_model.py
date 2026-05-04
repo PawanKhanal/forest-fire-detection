@@ -27,8 +27,9 @@ class SensorFireRiskModel:
         """Factory method to create the appropriate model."""
         models = {
             'random_forest': RandomForestClassifier(
-                n_estimators=100,
-                max_depth=10,
+                n_estimators=200,
+                max_depth=15,
+                class_weight='balanced',
                 random_state=42
             ),
             'logistic': LogisticRegression(
@@ -38,6 +39,26 @@ class SensorFireRiskModel:
         }
         return models.get(self.model_type, models['random_forest'])
     
+    def _engineer_features(self, X: np.ndarray) -> np.ndarray:
+        """
+        Add engineered features: Vapor Pressure Deficit (VPD) and Temp-Humidity interaction.
+        X is assumed to have columns: [Temperature (C), Humidity (%)]
+        """
+        T = X[:, 0]
+        RH = X[:, 1]
+        
+        # 1. Vapor Pressure Deficit (VPD) in kPa
+        # Saturation Vapor Pressure (SVP)
+        SVP = 0.6108 * np.exp((17.27 * T) / (T + 237.3))
+        VPD = SVP * (1 - (RH / 100.0))
+        
+        # 2. Temperature-Humidity interaction (Fire Risk Proxy)
+        # High temp + low humidity = high risk
+        TH_inter = T * (100.0 - RH) / 100.0
+        
+        # Stack all features: [Temp, RH, VPD, TH_inter]
+        return np.column_stack((X, VPD, TH_inter))
+        
     def train(self, X: np.ndarray, y: np.ndarray) -> 'SensorFireRiskModel':
         """
         Train the model on historical sensor data.
@@ -49,7 +70,8 @@ class SensorFireRiskModel:
         Returns:
             Self for method chaining
         """
-        X_scaled = self.scaler.fit_transform(X)
+        X_eng = self._engineer_features(X)
+        X_scaled = self.scaler.fit_transform(X_eng)
         self.model.fit(X_scaled, y)
         self.is_fitted = True
         return self
@@ -69,7 +91,8 @@ class SensorFireRiskModel:
             raise ValueError("Model must be trained before prediction")
         
         features = np.array([[temperature, humidity]])
-        features_scaled = self.scaler.transform(features)
+        features_eng = self._engineer_features(features)
+        features_scaled = self.scaler.transform(features_eng)
         probability = self.model.predict_proba(features_scaled)[0, 1]
         prediction = int(probability >= self.threshold)
         

@@ -8,7 +8,7 @@ from datetime import datetime
 import serial
 from pathlib import Path
 
-from models.sensor_model import SensorFireRiskModel
+from train_sensor_model import NepalFirePredictor
 from src.inference.predictor import FirePredictionSystem, SensorPredictionInput
 
 
@@ -28,6 +28,11 @@ class DataSource(ABC):
     @abstractmethod
     def disconnect(self) -> None:
         """Close connection."""
+        pass
+        
+    @abstractmethod
+    def send_risk(self, risk: float) -> None:
+        """Send risk value back to source."""
         pass
 
 
@@ -105,6 +110,14 @@ class ArduinoDataSource(DataSource):
         if self.serial_conn and self.serial_conn.is_open:
             self.serial_conn.close()
             print("✓ Disconnected from Arduino")
+            
+    def send_risk(self, risk: float) -> None:
+        """Send computed risk to Arduino to update LEDs."""
+        if self.serial_conn and self.serial_conn.is_open:
+            try:
+                self.serial_conn.write(f"{risk}\n".encode('utf-8'))
+            except Exception as e:
+                print(f"✗ Failed to send risk to Arduino: {str(e)}")
     
     @staticmethod
     def _parse_arduino_data(data_string: str) -> Optional[Dict[str, float]]:
@@ -122,8 +135,8 @@ class ArduinoDataSource(DataSource):
             if len(parts) < 2:
                 return None
             
-            temp_str = parts[0].split(':')[1].strip()
-            humidity_str = parts[1].split(':')[1].strip()
+            temp_str = parts[0].strip()
+            humidity_str = parts[1].strip()
             
             return {
                 'temperature': float(temp_str),
@@ -156,9 +169,9 @@ class FireRiskMonitor:
         self.readings_history: list = []
         
         try:
-            self.sensor_model = SensorFireRiskModel.load(sensor_model_path)
+            self.sensor_model = NepalFirePredictor(sensor_model_path)
         except Exception as e:
-            print(f"✗ Failed to load sensor model: {str(e)}")
+            print(f"✗ Failed to load Nepal predictor model: {str(e)}")
             raise
     
     def start(self) -> None:
@@ -200,6 +213,9 @@ class FireRiskMonitor:
                 sensor_data['temperature'],
                 sensor_data['humidity']
             )
+            
+            # Send the probability back to Arduino
+            self.data_source.send_risk(result['probability'])
             
             self._display_reading(sensor_data, result)
             self.readings_history.append({

@@ -38,6 +38,17 @@ void loop() {
   Serial.print(",");
   Serial.println(humidity);
   
+  // Check if Python script sent a risk probability back
+  if (Serial.available() > 0) {
+    float risk = Serial.parseFloat();
+    updateLEDs(risk);
+    
+    // Clear the rest of the serial buffer (like newline characters)
+    while (Serial.available() > 0) {
+      Serial.read();
+    }
+  }
+  
   delay(500);
 }
 

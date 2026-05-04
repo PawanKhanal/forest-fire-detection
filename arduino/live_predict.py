@@ -6,8 +6,10 @@ import time
 import sys
 from pathlib import Path
 
-import joblib
-import numpy as np
+# Add project root to path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from train_sensor_model import NepalFirePredictor
 
 
 def get_risk_level(probability):
@@ -28,10 +30,12 @@ def main():
         print("   Run: python train_sensor_model.py first")
         sys.exit(1)
 
-    print("📡 Loading model...")
-    model_data = joblib.load(model_path)
-    model = model_data['model']
-    scaler = model_data['scaler']
+    print("📡 Loading Nepal Predictor...")
+    try:
+        predictor = NepalFirePredictor(str(model_path))
+    except Exception as e:
+        print(f"❌ Failed to load model: {e}")
+        sys.exit(1)
 
     arduino_port = "/dev/ttyUSB0"
     try:
@@ -61,15 +65,21 @@ def main():
             temp = float(parts[0])
             hum = float(parts[1])
 
-            X = scaler.transform([[temp, hum]])
-            prob = model.predict_proba(X)[0, 1]
+            result = predictor.predict(temp, hum)
+            prob = result['probability']
+            
+            # Send risk back to Arduino
+            try:
+                ser.write(f"{prob}\n".encode('utf-8'))
+            except Exception as e:
+                print(f"Failed to send to Arduino: {e}")
 
             risk_level, status = get_risk_level(prob)
             risk_bar = "█" * int(prob * 20)
 
             print(f"Temp: {temp:5.1f}°C | Hum: {hum:5.1f}%")
             print(f"Risk: [{risk_bar:<20}] {prob:.1%}")
-            print(f"Status: {risk_level} - {status}")
+            print(f"Status: {result['risk_level']} - {result['recommendation']}")
             print("-" * 40)
 
         except (ValueError, IndexError):

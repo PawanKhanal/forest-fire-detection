@@ -8,8 +8,10 @@ from torch.utils.data import DataLoader
 from typing import Dict, Optional
 from pathlib import Path
 
+import torchvision.models as models
+
 class ForestFireCNN(nn.Module):
-    """CNN model for forest fire detection."""
+    """CNN model for forest fire detection using ResNet18 Transfer Learning."""
     
     def __init__(self, num_classes: int = 2):
         """
@@ -20,49 +22,21 @@ class ForestFireCNN(nn.Module):
         """
         super(ForestFireCNN, self).__init__()
         
-        # Feature extraction layers
-        self.features = nn.Sequential(
-            # Block 1
-            nn.Conv2d(3, 32, kernel_size=3, padding=1),
-            nn.BatchNorm2d(32),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(2, 2),
-            nn.Dropout2d(0.25),
-            
-            # Block 2
-            nn.Conv2d(32, 64, kernel_size=3, padding=1),
-            nn.BatchNorm2d(64),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(2, 2),
-            nn.Dropout2d(0.25),
-            
-            # Block 3
-            nn.Conv2d(64, 128, kernel_size=3, padding=1),
-            nn.BatchNorm2d(128),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(2, 2),
-            nn.Dropout2d(0.25),
-            
-            # Block 4
-            nn.Conv2d(128, 256, kernel_size=3, padding=1),
-            nn.BatchNorm2d(256),
-            nn.ReLU(inplace=True),
-            nn.AdaptiveAvgPool2d((1, 1)),
-            nn.Dropout2d(0.4)
-        )
+        # Load pre-trained ResNet18
+        self.resnet = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
         
-        # Classification layers
-        self.classifier = nn.Sequential(
-            nn.Flatten(),
-            nn.Linear(256, 128),
+        # Freeze base layers for Transfer Learning
+        for param in self.resnet.parameters():
+            param.requires_grad = False
+            
+        # Replace the classification head
+        num_ftrs = self.resnet.fc.in_features
+        self.resnet.fc = nn.Sequential(
+            nn.Linear(num_ftrs, 128),
             nn.BatchNorm1d(128),
             nn.ReLU(inplace=True),
             nn.Dropout(0.5),
-            nn.Linear(128, 64),
-            nn.BatchNorm1d(64),
-            nn.ReLU(inplace=True),
-            nn.Dropout(0.3),
-            nn.Linear(64, num_classes)
+            nn.Linear(128, num_classes)
         )
         
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -75,9 +49,7 @@ class ForestFireCNN(nn.Module):
         Returns:
             Class logits
         """
-        x = self.features(x)
-        x = self.classifier(x)
-        return x
+        return self.resnet(x)
     
     def save(self, filepath: str) -> None:
         """Save model state."""
