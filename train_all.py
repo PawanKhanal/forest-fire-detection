@@ -13,13 +13,13 @@ from pathlib import Path
 
 def run_command(cmd_list, description):
     print(f"\n{'=' * 60}")
-    print(f"🚀 Starting: {description}")
+    print(f">> Starting: {description}")
     print(f"{'=' * 60}\n")
     try:
         subprocess.run(cmd_list, check=True)
-        print(f"\n✅ Successfully completed: {description}")
+        print(f"\n[OK] Successfully completed: {description}")
     except subprocess.CalledProcessError as e:
-        print(f"\n❌ Error during {description}: {e}")
+        print(f"\n[ERROR] Error during {description}: {e}")
         sys.exit(1)
 
 
