@@ -22,7 +22,7 @@ def parse_args():
     parser.add_argument(
         '--data_dir', 
         type=str, 
-        default='data/raw',
+        default='data/raw/the_wildfire_dataset_2n_version',
         help='Path to dataset directory'
     )
     parser.add_argument(

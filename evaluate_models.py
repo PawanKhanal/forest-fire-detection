@@ -195,8 +195,16 @@ class ModelEvaluator:
             X, y, test_size=0.2, random_state=42, stratify=y
         )
         
-        # Scale test features
-        X_scaled = scaler.transform(X_test)
+        # Feature engineering MUST match training pipeline
+        T = X_test[:, 0]
+        RH = X_test[:, 1]
+        SVP = 0.6108 * np.exp((17.27 * T) / (T + 237.3))
+        VPD = SVP * (1 - (RH / 100.0))
+        TH_inter = T * (100.0 - RH) / 100.0
+        X_eng = np.column_stack((X_test, VPD, TH_inter))
+        
+        # Scale engineered features
+        X_scaled = scaler.transform(X_eng)
         
         # Predict on held-out test set
         predictions = model.predict(X_scaled)

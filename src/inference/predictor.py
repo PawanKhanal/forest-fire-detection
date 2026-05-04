@@ -4,7 +4,6 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Optional, Any, Union
-import cv2
 import numpy as np
 import torch
 import torch.nn as nn
@@ -213,7 +212,9 @@ class FirePredictionSystem:
                 prediction = predicted_class.item()
                 confidence = confidence.item()
             
-            class_names = {0: "NO_FIRE", 1: "FIRE"}
+            # Dataset ImageFolder sorts classes alphabetically:
+            # fire=0, nofire=1  (fire comes before nofire)
+            class_names = {0: "FIRE", 1: "NO_FIRE"}
             risk_level = self._get_risk_level_from_confidence(confidence, prediction)
             
             return PredictionResult(
