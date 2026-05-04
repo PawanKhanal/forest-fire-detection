@@ -57,31 +57,30 @@ def init_prediction_system() -> None:
             device='cpu'
         )
         prediction_system.class_names = ['FIRE', 'NO_FIRE']
-        print("✓ Image prediction system initialized")
+        print('[OK] Image prediction system initialized')
     except Exception as e:
-        print(f"✗ Failed to initialize image system: {e}")
-        print(f"  CNN model path: {cnn_model_path}")
-        print(f"  Sensor model path: {sensor_model_path}")
-        raise
+        print(f'[WARN] Image system init failed (image prediction disabled): {e}')
+        prediction_system = None  # allow sensor-only operation
 
     try:
         nepal_predictor = NepalFirePredictor(sensor_model_path)
-        print("✓ Nepal-calibrated sensor predictor initialized")
+        print('[OK] Nepal-calibrated sensor predictor initialized')
     except Exception as e:
-        print(f"✗ Failed to initialize Nepal predictor: {e}")
-        print(f"  Sensor model path: {sensor_model_path}")
-        raise
+        print(f'[ERR] Failed to initialize Nepal predictor: {e}')
+        raise  # sensor predictor is required
 
 
 # ---------------------------------------------------------------------------
 # Decorators
 # ---------------------------------------------------------------------------
 def require_systems(f):
-    """Decorator to ensure all systems are ready."""
+    """Decorator to ensure all ML systems are ready (for image/ensemble endpoints)."""
     @wraps(f)
     def wrapper(*args, **kwargs):
-        if prediction_system is None or nepal_predictor is None:
-            return jsonify({'error': 'Systems not initialized'}), 503
+        if prediction_system is None:
+            return jsonify({'error': 'Image model not loaded — image prediction unavailable'}), 503
+        if nepal_predictor is None:
+            return jsonify({'error': 'Sensor model not loaded'}), 503
         return f(*args, **kwargs)
     return wrapper
 
@@ -150,16 +149,17 @@ def dashboard() -> str:
 # ---------------------------------------------------------------------------
 # Routes - Sensor Readings (Nepal-Calibrated)
 # ---------------------------------------------------------------------------
-@app.route('/api/readings', methods=['GET'])
-def get_readings() -> Dict[str, Any]:
-    limit = request.args.get('limit', default=20, type=int)
-    return jsonify(readings_store[-limit:])
+@app.route('/api/readings', methods=['GET', 'POST'])
+def readings_endpoint() -> Dict[str, Any]:
+    """GET: return recent readings. POST: add a new sensor reading."""
+    if request.method == 'GET':
+        limit = request.args.get('limit', default=20, type=int)
+        return jsonify(readings_store[-limit:])
 
+    # --- POST ---
+    if nepal_predictor is None:
+        return jsonify({'error': 'Sensor model not initialized'}), 503
 
-@app.route('/api/readings', methods=['POST'])
-@require_systems
-def add_sensor_reading() -> Dict[str, Any]:
-    """Add sensor reading using Nepal-calibrated predictor."""
     data = request.get_json()
     if not data or 'temperature' not in data or 'humidity' not in data:
         return jsonify({'error': 'Missing temperature or humidity'}), 400
@@ -320,17 +320,7 @@ def get_statistics() -> Dict[str, Any]:
     }), 200
 
 
-# ---------------------------------------------------------------------------
-# Error Handlers
-# ---------------------------------------------------------------------------
-@app.errorhandler(404)
-def not_found(error):
-    return jsonify({'error': 'Resource not found'}), 404
-
-
-@app.errorhandler(500)
-def server_error(error):
-    return jsonify({'error': 'Internal server error'}), 500
+# (Error handlers registered above at lines 92-99)
 
 
 @app.after_request
@@ -338,7 +328,20 @@ def after_request(response):
     response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
     response.headers['Pragma'] = 'no-cache'
     response.headers['Expires'] = '0'
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
     return response
+
+
+@app.route('/api/<path:path>', methods=['OPTIONS'])
+def handle_options(path):
+    """Handle CORS preflight requests for all /api/* routes."""
+    response = jsonify({})
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+    return response, 200
 
 
 # ---------------------------------------------------------------------------
