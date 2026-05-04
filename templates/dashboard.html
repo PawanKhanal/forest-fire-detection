@@ -956,7 +956,10 @@
       document.getElementById('btn-reset').style.display = 'none';
 
       fetch('/api/predict-image', { method: 'POST', body: formData })
-        .then(r => r.json())
+        .then(r => {
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          return r.json();
+        })
         .then(data => {
           document.getElementById('image-loading').style.display = 'none';
           if (data.success) {
@@ -1006,7 +1009,10 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ temperature: temp, humidity: hum })
       })
-        .then(r => r.json())
+        .then(r => {
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          return r.json();
+        })
         .then(data => {
           if (data.success) {
             document.getElementById('input-temp').value = '';
@@ -1014,7 +1020,7 @@
             showToast('Reading submitted', 'success');
             updateReadings();
           } else {
-            showToast('Error: ' + data.error, 'danger');
+            showToast('Error: ' + (data.error || 'Unknown error'), 'danger');
           }
         })
         .catch(err => showToast('Error: ' + err.message, 'danger'));
@@ -1031,16 +1037,22 @@
     /* ── Data refresh ─────────────────────────────────────────────── */
     function updateReadings() {
       fetch('/api/readings?limit=20')
-        .then(r => r.json())
+        .then(r => {
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          return r.json();
+        })
         .then(data => {
           updateTable(data);
           updateGauge(data);
           updateChart(data);
         })
-        .catch(() => {});
+        .catch(err => console.error('Failed to fetch readings:', err));
 
       fetch('/api/statistics')
-        .then(r => r.json())
+        .then(r => {
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          return r.json();
+        })
         .then(data => {
           if (data.temperature) {
             document.getElementById('stat-avg-temp').textContent     = data.temperature.avg.toFixed(1);
@@ -1048,7 +1060,7 @@
             document.getElementById('stat-avg-prob').textContent     = (data.probability.avg * 100).toFixed(1) + '%';
           }
         })
-        .catch(() => {});
+        .catch(err => console.error('Failed to fetch statistics:', err));
     }
 
     function updateTable(data) {

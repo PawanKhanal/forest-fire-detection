@@ -60,6 +60,8 @@ def init_prediction_system() -> None:
         print("✓ Image prediction system initialized")
     except Exception as e:
         print(f"✗ Failed to initialize image system: {e}")
+        print(f"  CNN model path: {cnn_model_path}")
+        print(f"  Sensor model path: {sensor_model_path}")
         raise
 
     try:
@@ -67,6 +69,7 @@ def init_prediction_system() -> None:
         print("✓ Nepal-calibrated sensor predictor initialized")
     except Exception as e:
         print(f"✗ Failed to initialize Nepal predictor: {e}")
+        print(f"  Sensor model path: {sensor_model_path}")
         raise
 
 
@@ -81,6 +84,19 @@ def require_systems(f):
             return jsonify({'error': 'Systems not initialized'}), 503
         return f(*args, **kwargs)
     return wrapper
+
+
+# ---------------------------------------------------------------------------
+# Error Handlers (ensure all responses are JSON)
+# ---------------------------------------------------------------------------
+@app.errorhandler(404)
+def handle_404(e):
+    return jsonify({'error': 'Endpoint not found'}), 404
+
+
+@app.errorhandler(500)
+def handle_500(e):
+    return jsonify({'error': f'Internal server error: {str(e)}'}), 500
 
 
 # ---------------------------------------------------------------------------
@@ -285,7 +301,12 @@ def serve_upload_file(filename: str):
 @app.route('/api/statistics', methods=['GET'])
 def get_statistics() -> Dict[str, Any]:
     if not readings_store:
-        return jsonify({'error': 'No readings available'}), 400
+        return jsonify({
+            'total_readings': 0,
+            'temperature': {'min': 0, 'max': 0, 'avg': 0},
+            'humidity': {'min': 0, 'max': 0, 'avg': 0},
+            'probability': {'min': 0, 'max': 0, 'avg': 0}
+        }), 200
 
     temps = [r['temperature'] for r in readings_store]
     hums = [r['humidity'] for r in readings_store]
@@ -296,7 +317,7 @@ def get_statistics() -> Dict[str, Any]:
         'temperature': {'min': min(temps), 'max': max(temps), 'avg': round(sum(temps)/len(temps), 1)},
         'humidity': {'min': min(hums), 'max': max(hums), 'avg': round(sum(hums)/len(hums), 1)},
         'probability': {'min': min(probs), 'max': max(probs), 'avg': round(sum(probs)/len(probs), 3)}
-    })
+    }), 200
 
 
 # ---------------------------------------------------------------------------
