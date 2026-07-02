@@ -209,12 +209,14 @@ class FirePredictionSystem:
                 probabilities = torch.softmax(logits, dim=1)
                 
                 confidence, predicted_class = torch.max(probabilities, 1)
-                prediction = predicted_class.item()
+                raw_prediction = predicted_class.item()
                 confidence = confidence.item()
             
             # Dataset ImageFolder sorts classes alphabetically:
-            # fire=0, nofire=1  (fire comes before nofire)
-            class_names = {0: "FIRE", 1: "NO_FIRE"}
+            # fire=0, nofire=1 (fire comes before nofire).
+            # We standardize: 0: NO_FIRE, 1: FIRE
+            prediction = 1 - raw_prediction
+            class_names = {0: "NO_FIRE", 1: "FIRE"}
             risk_level = self._get_risk_level_from_confidence(confidence, prediction)
             
             return PredictionResult(
@@ -295,20 +297,26 @@ class FirePredictionSystem:
         image_result = self.predict_from_image(image_input)
         sensor_result = self.predict_from_sensors(sensor_input)
         
-        weighted_confidence = (
-            image_result.confidence * image_weight +
-            sensor_result.confidence * sensor_weight
+        # Calculate standard probability of FIRE for both models:
+        # image_result.prediction = 1 for FIRE, 0 for NO_FIRE.
+        # image_result.confidence is the confidence of the predicted class (always >= 0.5)
+        image_fire_prob = image_result.confidence if image_result.prediction == 1 else (1 - image_result.confidence)
+        sensor_fire_prob = sensor_result.confidence  # sensor_result.confidence is the probability of FIRE (from 0 to 1)
+        
+        weighted_probability = (
+            image_fire_prob * image_weight +
+            sensor_fire_prob * sensor_weight
         )
         
-        ensemble_prediction = 1 if weighted_confidence >= 0.5 else 0
+        ensemble_prediction = 1 if weighted_probability >= 0.5 else 0
         ensemble_risk = self._get_risk_level_from_confidence(
-            weighted_confidence,
+            weighted_probability if ensemble_prediction == 1 else (1 - weighted_probability),
             ensemble_prediction
         )
         
         return PredictionResult(
             prediction=ensemble_prediction,
-            confidence=weighted_confidence,
+            confidence=weighted_probability if ensemble_prediction == 1 else (1 - weighted_probability),
             risk_level=ensemble_risk,
             metadata={
                 'ensemble_type': 'weighted_average',

@@ -132,7 +132,6 @@ class SensorModelTrainer:
         self.test_size = test_size
         self.random_state = random_state
         self.model = SensorFireRiskModel(model_type=model_type)
-        self.scaler = StandardScaler()
         self.metrics: Dict[str, float] = {}
         self.cv_scores: Optional[np.ndarray] = None
         self.X_test = None
@@ -141,23 +140,11 @@ class SensorModelTrainer:
 
     def predict_risk(self, temperature: float, humidity: float) -> Dict[str, Any]:
         """Predict fire risk for given sensor readings."""
-        input_scaled = self.scaler.transform([[temperature, humidity]])
-        proba = self.model.model.predict_proba(input_scaled)[0, 1]
-        pred = int(proba >= 0.5)
-        
-        if proba < 0.25:
-            risk_level = "LOW"
-        elif proba < 0.50:
-            risk_level = "MODERATE"
-        elif proba < 0.75:
-            risk_level = "HIGH"
-        else:
-            risk_level = "CRITICAL"
-        
+        res = self.model.predict(temperature, humidity)
         return {
-            'prediction': pred,
-            'probability': proba,
-            'risk_level': risk_level,
+            'prediction': res['fire_risk'],
+            'probability': res['probability'],
+            'risk_level': res['risk_level'],
             'temperature': temperature,
             'humidity': humidity
         }
@@ -168,15 +155,16 @@ class SensorModelTrainer:
             X, y, test_size=self.test_size, random_state=self.random_state, stratify=y
         )
         
-        X_train_scaled = self.scaler.fit_transform(X_train)
-        X_test_scaled = self.scaler.transform(X_test)
-        
         print("\n🔥 Training Random Forest...")
         start_time = time.time()
-        self.model.model.fit(X_train_scaled, y_train)
+        self.model.train(X_train, y_train)
         training_time = time.time() - start_time
         
-        y_pred = self.model.model.predict(X_test_scaled)
+        y_pred = []
+        for x in X_test:
+            res = self.model.predict(x[0], x[1])
+            y_pred.append(res['fire_risk'])
+        y_pred = np.array(y_pred)
         
         self.X_test = X_test
         self.y_test = y_test
@@ -197,7 +185,8 @@ class SensorModelTrainer:
     def cross_validate(self, X: np.ndarray, y: np.ndarray, cv: int = 5) -> np.ndarray:
         """Perform cross-validation."""
         print(f"\n🔄 {cv}-Fold Cross-Validation:")
-        X_scaled = self.scaler.fit_transform(X)
+        X_eng = self.model._engineer_features(X)
+        X_scaled = self.model.scaler.fit_transform(X_eng)
         self.cv_scores = cross_val_score(self.model.model, X_scaled, y, cv=cv, scoring='accuracy')
         
         print(f"   Scores: {[f'{s:.3f}' for s in self.cv_scores]}")
@@ -208,8 +197,7 @@ class SensorModelTrainer:
     def train_final(self, X: np.ndarray, y: np.ndarray) -> None:
         """Train final model on full dataset."""
         print("\n🔥 Training final model on full dataset...")
-        X_scaled = self.scaler.fit_transform(X)
-        self.model.model.fit(X_scaled, y)
+        self.model.train(X, y)
     
     def save(self, filepath: Path) -> None:
         """Save model, scaler, and metadata."""
@@ -217,8 +205,9 @@ class SensorModelTrainer:
         
         joblib.dump({
             'model': self.model.model,
-            'scaler': self.scaler,
+            'scaler': self.model.scaler,
             'model_type': self.model_type,
+            'is_fitted': self.model.is_fitted,
             'training_date': time.strftime('%Y-%m-%d %H:%M:%S'),
             'metrics': self.metrics,
             'cv_mean': self.cv_scores.mean() if self.cv_scores is not None else None,
@@ -256,9 +245,7 @@ class NepalFirePredictor:
         Args:
             model_path: Path to saved model file
         """
-        data = joblib.load(model_path)
-        self.model = data['model']
-        self.scaler = data['scaler']
+        self.sensor_model = SensorFireRiskModel.load(model_path)
         
     def _calculate_temp_factor(self, temperature: float) -> float:
         """Calculate temperature risk factor (0-1)."""
@@ -308,8 +295,8 @@ class NepalFirePredictor:
         
         # ML model probability
         try:
-            input_scaled = self.scaler.transform([[temperature, humidity]])
-            ml_proba = self.model.predict_proba(input_scaled)[0, 1]
+            ml_res = self.sensor_model.predict(temperature, humidity)
+            ml_proba = ml_res['probability']
         except Exception:
             ml_proba = 0.5  # Fallback if model fails
         
@@ -320,21 +307,18 @@ class NepalFirePredictor:
         if final_score < 0.20:
             risk_level = "LOW"
             recommendation = "Normal conditions. Regular monitoring."
-        elif final_score < 0.40:
-            risk_level = "MODERATE"
+        elif final_score < 0.50:
+            risk_level = "MEDIUM"
             recommendation = "Slightly elevated. Monitor every 2 hours."
-        elif final_score < 0.60:
+        elif final_score < 0.80:
             risk_level = "HIGH"
             recommendation = "Alert forest department. Increase monitoring."
-        elif final_score < 0.80:
-            risk_level = "VERY HIGH"
-            recommendation = "Emergency alert! Prepare firefighting resources."
         else:
-            risk_level = "EXTREME"
-            recommendation = "IMMEDIATE ACTION REQUIRED! Possible evacuation."
+            risk_level = "CRITICAL"
+            recommendation = "IMMEDIATE ACTION REQUIRED! Emergency alert!"
         
         return {
-            'fire_risk': final_score >= 0.40,
+            'fire_risk': final_score >= 0.50,
             'probability': float(final_score),
             'risk_percentage': float(final_score * 100),
             'risk_level': risk_level,
@@ -467,7 +451,9 @@ def main():
     
     # Train final and save
     trainer.train_final(X, y)
-    visualizer.plot_learning_curves(trainer.model.model, trainer.scaler.fit_transform(X), y)
+    X_eng = trainer.model._engineer_features(X)
+    X_scaled = trainer.model.scaler.transform(X_eng)
+    visualizer.plot_learning_curves(trainer.model.model, X_scaled, y)
     trainer.save(model_dir / "sensor_model.pkl")
     
     # Show both raw ML and Nepal-calibrated predictions

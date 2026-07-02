@@ -37,3 +37,6 @@ ipykernel>=6.25.0
 # Kaggle API Integration
 kaggle>=1.5.16
 kagglehub>=0.4.0
+
+# Database Integration
+psycopg2-binary>=2.9.0

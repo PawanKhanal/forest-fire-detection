@@ -138,6 +138,17 @@ class ArduinoDataSource(DataSource):
             temp_str = parts[0].strip()
             humidity_str = parts[1].strip()
             
+            # Strip prefixes if present
+            if temp_str.upper().startswith("T:"):
+                temp_str = temp_str[2:].strip()
+            elif temp_str.lower().startswith("temp:"):
+                temp_str = temp_str[5:].strip()
+                
+            if humidity_str.upper().startswith("H:"):
+                humidity_str = humidity_str[2:].strip()
+            elif humidity_str.lower().startswith("humidity:"):
+                humidity_str = humidity_str[9:].strip()
+            
             return {
                 'temperature': float(temp_str),
                 'humidity': float(humidity_str)

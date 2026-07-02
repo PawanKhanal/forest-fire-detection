@@ -145,7 +145,7 @@ class ModelEvaluator:
         print(classification_report(
             all_targets,
             all_predictions,
-            target_names=['NO_FIRE', 'FIRE']
+            target_names=['FIRE', 'NO_FIRE']
         ))
         
         metrics = {
@@ -264,8 +264,8 @@ class ModelEvaluator:
                 cmap='Blues',
                 ax=axes[0],
                 cbar=False,
-                xticklabels=['NO_FIRE', 'FIRE'],
-                yticklabels=['NO_FIRE', 'FIRE']
+                xticklabels=['FIRE', 'NO_FIRE'],
+                yticklabels=['FIRE', 'NO_FIRE']
             )
             axes[0].set_title('CNN Model - Confusion Matrix', fontsize=12, fontweight='bold')
             axes[0].set_ylabel('True Label')

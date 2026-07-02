@@ -7,9 +7,10 @@ from typing import Dict, Any, List
 from functools import wraps
 
 from flask import (
-    Flask, render_template, request, jsonify, send_from_directory
+    Flask, render_template, request, jsonify, send_from_directory, session
 )
 from werkzeug.utils import secure_filename
+from werkzeug.security import generate_password_hash, check_password_hash
 from dotenv import load_dotenv
 
 from train_sensor_model import NepalFirePredictor
@@ -18,9 +19,13 @@ from src.inference.predictor import (
     ImagePredictionInput,
     SensorPredictionInput
 )
+from src.data.database import DatabaseManager
 
 # Load environment variables
 load_dotenv()
+
+# Initialize Database Manager
+db_mgr = DatabaseManager()
 
 # ---------------------------------------------------------------------------
 # Flask Configuration
@@ -29,6 +34,7 @@ app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max
 app.config['UPLOAD_FOLDER'] = Path('uploads')
 app.config['UPLOAD_FOLDER'].mkdir(exist_ok=True)
+app.secret_key = os.getenv('SECRET_KEY', 'forest-fire-bca-secret-key-9999')
 
 ALLOWED_EXTENSIONS = {'jpg', 'jpeg', 'png', 'bmp', 'tiff'}
 
@@ -105,16 +111,16 @@ def allowed_file(filename: str) -> bool:
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
-def add_reading(temperature: float, humidity: float, risk_level: str, probability: float) -> None:
-    readings_store.append({
-        'time': datetime.now().strftime('%H:%M:%S'),
-        'temperature': temperature,
-        'humidity': humidity,
-        'risk_level': risk_level,
-        'probability': probability
-    })
-    if len(readings_store) > 100:
-        readings_store.pop(0)
+def add_reading(temperature: float, humidity: float, risk_level: str, probability: float, trigger_alert: bool = True) -> int:
+    reading_id = db_mgr.add_sensor_reading(temperature, humidity, risk_level, probability)
+    if trigger_alert and risk_level in ['HIGH', 'CRITICAL']:
+        db_mgr.add_alert(
+            source_type='sensor',
+            source_id=reading_id,
+            risk_level=risk_level,
+            message=f"High fire risk detected by sensors: Temp {temperature:.1f}°C, Humidity {humidity:.1f}%."
+        )
+    return reading_id
 
 
 def image_risk_level(class_name: str, confidence: float) -> str:
@@ -154,7 +160,7 @@ def readings_endpoint() -> Dict[str, Any]:
     """GET: return recent readings. POST: add a new sensor reading."""
     if request.method == 'GET':
         limit = request.args.get('limit', default=20, type=int)
-        return jsonify(readings_store[-limit:])
+        return jsonify(db_mgr.get_recent_readings(limit))
 
     # --- POST ---
     if nepal_predictor is None:
@@ -210,6 +216,22 @@ def predict_image() -> Dict[str, Any]:
 
         class_name = result.metadata.get('class_name', 'UNKNOWN')
         risk_level = image_risk_level(class_name, result.confidence)
+
+        # Save to database
+        pred_id = db_mgr.add_image_prediction(
+            image_path=f"/uploads/{filepath.name}",
+            class_name=class_name,
+            confidence=result.confidence,
+            risk_level=risk_level
+        )
+
+        if risk_level in ['HIGH', 'CRITICAL']:
+            db_mgr.add_alert(
+                source_type='image',
+                source_id=pred_id,
+                risk_level=risk_level,
+                message=f"Image prediction detected {class_name} with {result.confidence:.1%} confidence."
+            )
 
         return jsonify({
             'success': True,
@@ -267,7 +289,25 @@ def predict_ensemble() -> Dict[str, Any]:
         else:
             risk_level = "CRITICAL"
 
-        add_reading(temperature, humidity, risk_level, combined)
+        # Save to database
+        ens_id = db_mgr.add_ensemble_prediction(
+            image_path=f"/uploads/{filepath.name}",
+            temperature=temperature,
+            humidity=humidity,
+            image_confidence=image_result.confidence,
+            sensor_confidence=sensor_conf,
+            ensemble_confidence=combined,
+            risk_level=risk_level
+        )
+        add_reading(temperature, humidity, risk_level, combined, trigger_alert=False)
+
+        if risk_level in ['HIGH', 'CRITICAL']:
+            db_mgr.add_alert(
+                source_type='ensemble',
+                source_id=ens_id,
+                risk_level=risk_level,
+                message=f"Ensemble prediction triggered alert: Combined confidence {combined:.1%}, Risk {risk_level}."
+            )
 
         return jsonify({
             'success': True,
@@ -282,6 +322,119 @@ def predict_ensemble() -> Dict[str, Any]:
 
     except Exception as e:
         return jsonify({'error': f'Ensemble prediction failed: {e}'}), 500
+
+
+# ---------------------------------------------------------------------------
+# Routes - User Authentication
+# ---------------------------------------------------------------------------
+@app.route('/api/auth/register', methods=['POST'])
+def register() -> Dict[str, Any]:
+    """Register a new operator/admin user."""
+    data = request.get_json()
+    if not data or 'username' not in data or 'password' not in data:
+        return jsonify({'error': 'Missing username or password'}), 400
+        
+    username = data['username'].strip()
+    password = data['password']
+    email = data.get('email', '').strip()
+    role = data.get('role', 'operator').strip()
+    
+    if len(username) < 3 or len(password) < 6:
+        return jsonify({'error': 'Username must be >= 3 chars, password >= 6 chars'}), 400
+        
+    try:
+        # Check if user already exists
+        if db_mgr.get_user_by_username(username):
+            return jsonify({'error': 'Username already exists'}), 400
+            
+        password_hash = generate_password_hash(password)
+        db_mgr.create_user(username, password_hash, email, role)
+        return jsonify({'success': True, 'message': 'User registered successfully'})
+    except Exception as e:
+        return jsonify({'error': f'Registration failed: {str(e)}'}), 500
+
+
+@app.route('/api/auth/login', methods=['POST'])
+def login() -> Dict[str, Any]:
+    """Login an operator/admin user."""
+    data = request.get_json()
+    if not data or 'username' not in data or 'password' not in data:
+        return jsonify({'error': 'Missing username or password'}), 400
+        
+    username = data['username'].strip()
+    password = data['password']
+    
+    try:
+        user = db_mgr.get_user_by_username(username)
+        if not user or not check_password_hash(user['password_hash'], password):
+            return jsonify({'error': 'Invalid username or password'}), 401
+            
+        session.clear()
+        session['username'] = user['username']
+        session['role'] = user['role']
+        
+        return jsonify({
+            'success': True,
+            'user': {
+                'username': user['username'],
+                'role': user['role']
+            }
+        })
+    except Exception as e:
+        return jsonify({'error': f'Login failed: {str(e)}'}), 500
+
+
+@app.route('/api/auth/logout', methods=['POST'])
+def logout() -> Dict[str, Any]:
+    """Logout current user."""
+    session.clear()
+    return jsonify({'success': True, 'message': 'Logged out successfully'})
+
+
+@app.route('/api/auth/status', methods=['GET'])
+def auth_status() -> Dict[str, Any]:
+    """Get active login session status."""
+    if 'username' in session:
+        return jsonify({
+            'logged_in': True,
+            'username': session['username'],
+            'role': session.get('role', 'operator')
+        })
+    return jsonify({'logged_in': False})
+
+
+# ---------------------------------------------------------------------------
+# Routes - System Alerts
+# ---------------------------------------------------------------------------
+@app.route('/api/alerts', methods=['GET'])
+def get_alerts() -> Dict[str, Any]:
+    """Get recent alerts list."""
+    try:
+        limit = request.args.get('limit', default=50, type=int)
+        alerts = db_mgr.get_alerts(limit)
+        return jsonify(alerts)
+    except Exception as e:
+        return jsonify({'error': f'Failed to retrieve alerts: {str(e)}'}), 500
+
+
+@app.route('/api/alerts/resolve', methods=['POST'])
+def resolve_alert() -> Dict[str, Any]:
+    """Resolve an active alert (authentication required)."""
+    if 'username' not in session:
+        return jsonify({'error': 'Authentication required to resolve alerts'}), 401
+        
+    data = request.get_json()
+    if not data or 'alert_id' not in data:
+        return jsonify({'error': 'Missing alert_id'}), 400
+        
+    try:
+        alert_id = int(data['alert_id'])
+        success = db_mgr.resolve_alert(alert_id, session['username'])
+        if success:
+            return jsonify({'success': True, 'message': f'Alert {alert_id} resolved.'})
+        return jsonify({'error': 'Failed to resolve alert'}), 400
+    except Exception as e:
+        return jsonify({'error': f'Error resolving alert: {str(e)}'}), 500
 
 
 # ---------------------------------------------------------------------------
@@ -300,24 +453,7 @@ def serve_upload_file(filename: str):
 
 @app.route('/api/statistics', methods=['GET'])
 def get_statistics() -> Dict[str, Any]:
-    if not readings_store:
-        return jsonify({
-            'total_readings': 0,
-            'temperature': {'min': 0, 'max': 0, 'avg': 0},
-            'humidity': {'min': 0, 'max': 0, 'avg': 0},
-            'probability': {'min': 0, 'max': 0, 'avg': 0}
-        }), 200
-
-    temps = [r['temperature'] for r in readings_store]
-    hums = [r['humidity'] for r in readings_store]
-    probs = [r['probability'] for r in readings_store]
-
-    return jsonify({
-        'total_readings': len(readings_store),
-        'temperature': {'min': min(temps), 'max': max(temps), 'avg': round(sum(temps)/len(temps), 1)},
-        'humidity': {'min': min(hums), 'max': max(hums), 'avg': round(sum(hums)/len(hums), 1)},
-        'probability': {'min': min(probs), 'max': max(probs), 'avg': round(sum(probs)/len(probs), 3)}
-    }), 200
+    return jsonify(db_mgr.get_statistics()), 200
 
 
 # (Error handlers registered above at lines 92-99)
