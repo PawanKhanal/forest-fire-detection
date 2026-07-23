@@ -2,6 +2,12 @@
 """Train sensor-based ML model on Portuguese Forest Fire Dataset + Nepal-calibrated predictor."""
 
 import sys
+
+# Force standard streams to use UTF-8 encoding (resolves Windows UnicodeEncodeError on console)
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8')
 import time
 from pathlib import Path
 from typing import Tuple, Dict, Any, Optional
@@ -20,10 +26,6 @@ import joblib
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-
-# =============================================================================
-# Data Loading
-# =============================================================================
 
 class SensorDataLoader:
     """Load and prepare sensor data."""
@@ -55,9 +57,6 @@ class SensorDataLoader:
         return X, y
 
 
-# =============================================================================
-# Visualization
-# =============================================================================
 
 class ModelVisualizer:
     """Generate evaluation plots."""
@@ -72,7 +71,7 @@ class ModelVisualizer:
         
         train_sizes, train_scores, val_scores = learning_curve(
             model, X, y, cv=5, n_jobs=-1,
-            train_sizes=np.linspace(0.1, 1.0, 10),
+            train_sizes=np.linspace(0.3, 1.0, 8),
             scoring='accuracy'
         )
         
@@ -120,14 +119,12 @@ class ModelVisualizer:
         print(f"   Confusion matrix saved to {filepath}")
 
 
-# =============================================================================
-# Trainer
-# =============================================================================
+
 
 class SensorModelTrainer:
     """Train and evaluate the sensor model."""
     
-    def __init__(self, model_type: str = 'random_forest', test_size: float = 0.2, random_state: int = 42):
+    def __init__(self, model_type: str = 'logistic', test_size: float = 0.2, random_state: int = 42):
         self.model_type = model_type
         self.test_size = test_size
         self.random_state = random_state
@@ -223,9 +220,7 @@ class SensorModelTrainer:
             print(f"   {metric}: {value:.4f} ({value*100:.1f}%)")
 
 
-# =============================================================================
-# Nepal-Calibrated Predictor (for Arduino deployment)
-# =============================================================================
+
 
 class NepalFirePredictor:
     """
@@ -330,9 +325,6 @@ class NepalFirePredictor:
         }
 
 
-# =============================================================================
-# Data Analysis
-# =============================================================================
 
 class DataAnalyzer:
     """Analyze patterns in sensor data."""
@@ -358,9 +350,6 @@ class DataAnalyzer:
         print(f"   Nepal fires occur at 30-40°C (wildfires). Model is calibrated accordingly.")
 
 
-# =============================================================================
-# Test Scenarios
-# =============================================================================
 
 def print_ml_test_scenarios(trainer: SensorModelTrainer) -> None:
     """Print raw ML model predictions."""
@@ -407,9 +396,6 @@ def print_nepal_test_scenarios(predictor: NepalFirePredictor) -> None:
         print(f"  → {result['recommendation']}")
 
 
-# =============================================================================
-# Main
-# =============================================================================
 
 def main():
     """Main training pipeline."""
@@ -440,7 +426,7 @@ def main():
     DataAnalyzer.analyze(df)
     
     # Train
-    trainer = SensorModelTrainer(model_type='random_forest')
+    trainer = SensorModelTrainer(model_type='logistic')
     trainer.train(X, y)
     trainer.cross_validate(X, y)
     

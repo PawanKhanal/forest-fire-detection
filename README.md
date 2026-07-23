@@ -271,7 +271,8 @@ To deploy the physical module, wire an **Arduino Uno** (or similar ATmega328P mi
 forest-fire-detection/
 │
 ├── arduino/
-│   └── arduino_dht11_fire.ino    # Arduino sketch to read DHT11 and control LEDs
+│   ├── arduino_dht11_fire.ino    # Arduino sketch to read DHT11 and control LEDs (Serial)
+│   └── esp_dht11_restapi.ino     # ESP8266/ESP32 sketch to read DHT11 and post via HTTP REST API
 │
 ├── config/
 │   └── config.yaml               # YAML global configuration file
@@ -383,15 +384,34 @@ python train_sensor_model.py
 
 ---
 
-### Phase B: Launching Hardware Integration (Arduino)
+### Phase B: Launching Hardware Integration
+
+#### Option 1: Wired Serial Connection (Arduino Uno)
 1.  Connect your Arduino board to the PC via USB cable.
-2.  Open the Arduino IDE, load `arduino/arduino_dht11_fire.ino`, choose the appropriate board/port, and click **Upload**.
+2.  Open the Arduino IDE, load [arduino_dht11_fire.ino](file:///c:/Users/DELL/Music/fyp/forest-fire-detection/arduino/arduino_dht11_fire.ino), choose the appropriate board/port, and click **Upload**.
 3.  Modify `ARDUINO_PORT` in your `.env` file to match the assigned port (e.g. `COM3` on Windows, or `/dev/ttyUSB0` on Linux).
 4.  Run the Python listener daemon:
     ```bash
     python arduino_reader.py
     ```
     *The console will display color-coded risk levels (🟢 Green / 🟡 Yellow / 🔴 Red) as data streams in.*
+
+#### Option 2: Wireless IoT Connection (ESP8266 / ESP32 via HTTP REST API)
+1.  Open the Arduino IDE.
+2.  Install the required libraries:
+    *   **DHT sensor library** (by Adafruit)
+    *   **Adafruit Unified Sensor** (by Adafruit)
+    *   **ArduinoJson** (by Benoit Blanchon, v6 or v7)
+3.  Load [esp_dht11_restapi.ino](file:///c:/Users/DELL/Music/fyp/forest-fire-detection/arduino/esp_dht11_restapi.ino) into the IDE.
+4.  Configure your Wi-Fi details and the IP address of your Flask server:
+    ```cpp
+    const char* ssid = "YOUR_WIFI_SSID";
+    const char* password = "YOUR_WIFI_PASSWORD";
+    const char* serverUrl = "http://<YOUR_FLASK_SERVER_IP>:5000/api/readings";
+    ```
+5.  Select your ESP8266 or ESP32 board and upload the code.
+6.  Start your Flask application (`python app.py`).
+7.  The ESP module will automatically connect to Wi-Fi, query the DHT11, and perform non-blocking HTTP POST requests. The risk analysis will run on the server, log into the SQL database, and update the physical LEDs in real-time. No background python scripts needed on the PC!
 
 ---
 
