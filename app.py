@@ -91,6 +91,23 @@ def require_systems(f):
     return wrapper
 
 
+def require_role(roles):
+    """Decorator to restrict access to specific roles."""
+    if isinstance(roles, str):
+        roles = [roles]
+        
+    def decorator(f):
+        @wraps(f)
+        def wrapper(*args, **kwargs):
+            if 'username' not in session:
+                return jsonify({'error': 'Authentication required'}), 401
+            if session.get('role') not in roles:
+                return jsonify({'error': 'Unauthorized: Insufficient permissions'}), 403
+            return f(*args, **kwargs)
+        return wrapper
+    return decorator
+
+
 # ---------------------------------------------------------------------------
 # Error Handlers (ensure all responses are JSON)
 # ---------------------------------------------------------------------------
@@ -157,8 +174,10 @@ def dashboard() -> str:
 # ---------------------------------------------------------------------------
 @app.route('/api/readings', methods=['GET', 'POST'])
 def readings_endpoint() -> Dict[str, Any]:
-    """GET: return recent readings. POST: add a new sensor reading."""
+    """GET: return recent readings (auth required). POST: add a new sensor reading (ESP32 telemetry)."""
     if request.method == 'GET':
+        if 'username' not in session:
+            return jsonify({'error': 'Authentication required'}), 401
         limit = request.args.get('limit', default=20, type=int)
         return jsonify(db_mgr.get_recent_readings(limit))
 
@@ -195,10 +214,47 @@ def readings_endpoint() -> Dict[str, Any]:
         return jsonify({'error': f'Prediction failed: {e}'}), 500
 
 
+@app.route('/api/readings/manual', methods=['POST'])
+@require_role(['admin', 'operator'])
+def add_manual_reading() -> Dict[str, Any]:
+    """Protected endpoint for human operators to submit manual sensor readings."""
+    if nepal_predictor is None:
+        return jsonify({'error': 'Sensor model not initialized'}), 503
+
+    data = request.get_json()
+    if not data or 'temperature' not in data or 'humidity' not in data:
+        return jsonify({'error': 'Missing temperature or humidity'}), 400
+
+    try:
+        temperature = float(data['temperature'])
+        humidity = float(data['humidity'])
+
+        # Use Nepal-calibrated predictor
+        result = nepal_predictor.predict(temperature, humidity)
+
+        add_reading(temperature, humidity, result['risk_level'], result['probability'])
+
+        return jsonify({
+            'success': True,
+            'prediction': int(result['fire_risk']),
+            'confidence': float(result['probability']),
+            'risk_level': str(result['risk_level']),
+            'temperature': float(temperature),
+            'humidity': float(humidity),
+            'recommendation': str(result['recommendation'])
+        })
+
+    except (ValueError, TypeError) as e:
+        return jsonify({'error': f'Invalid input: {e}'}), 400
+    except Exception as e:
+        return jsonify({'error': f'Prediction failed: {e}'}), 500
+
+
 # ---------------------------------------------------------------------------
 # Routes - Image Prediction
 # ---------------------------------------------------------------------------
 @app.route('/api/predict-image', methods=['POST'])
+@require_role(['admin', 'operator'])
 @require_systems
 def predict_image() -> Dict[str, Any]:
     """Predict fire from uploaded image."""
@@ -250,6 +306,7 @@ def predict_image() -> Dict[str, Any]:
 # Routes - Ensemble Prediction
 # ---------------------------------------------------------------------------
 @app.route('/api/predict-ensemble', methods=['POST'])
+@require_role(['admin', 'operator'])
 @require_systems
 def predict_ensemble() -> Dict[str, Any]:
     """Combined image + Nepal-calibrated sensor prediction."""
@@ -328,6 +385,7 @@ def predict_ensemble() -> Dict[str, Any]:
 # Routes - User Authentication
 # ---------------------------------------------------------------------------
 @app.route('/api/auth/register', methods=['POST'])
+@require_role('admin')
 def register() -> Dict[str, Any]:
     """Register a new operator/admin user."""
     data = request.get_json()
@@ -407,6 +465,7 @@ def auth_status() -> Dict[str, Any]:
 # Routes - System Alerts
 # ---------------------------------------------------------------------------
 @app.route('/api/alerts', methods=['GET'])
+@require_role(['admin', 'operator'])
 def get_alerts() -> Dict[str, Any]:
     """Get recent alerts list."""
     try:
@@ -418,10 +477,9 @@ def get_alerts() -> Dict[str, Any]:
 
 
 @app.route('/api/alerts/resolve', methods=['POST'])
+@require_role(['admin', 'operator'])
 def resolve_alert() -> Dict[str, Any]:
     """Resolve an active alert (authentication required)."""
-    if 'username' not in session:
-        return jsonify({'error': 'Authentication required to resolve alerts'}), 401
         
     data = request.get_json()
     if not data or 'alert_id' not in data:
@@ -441,6 +499,7 @@ def resolve_alert() -> Dict[str, Any]:
 # Routes - Info & Static
 # ---------------------------------------------------------------------------
 @app.route('/api/model-info', methods=['GET'])
+@require_role(['admin', 'operator'])
 @require_systems
 def get_model_info() -> Dict[str, Any]:
     return jsonify(prediction_system.get_model_info())
@@ -452,6 +511,7 @@ def serve_upload_file(filename: str):
 
 
 @app.route('/api/statistics', methods=['GET'])
+@require_role(['admin', 'operator'])
 def get_statistics() -> Dict[str, Any]:
     return jsonify(db_mgr.get_statistics()), 200
 

@@ -69,10 +69,11 @@ class ModelVisualizer:
         """Generate learning curves."""
         print("\n📈 Generating Learning Curves...")
         
-        train_sizes, train_scores, val_scores = learning_curve(
+        train_sizes, train_scores, val_scores, _, _ = learning_curve(
             model, X, y, cv=5, n_jobs=-1,
             train_sizes=np.linspace(0.3, 1.0, 8),
-            scoring='accuracy'
+            scoring='accuracy',
+            return_times=True
         )
         
         train_mean = train_scores.mean(axis=1)

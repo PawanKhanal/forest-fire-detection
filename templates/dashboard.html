@@ -730,6 +730,7 @@
       <div class="clock mono" id="clock" aria-live="off" style="margin-right: 15px;">--:--:--</div>
       <div class="auth-area" id="auth-area" style="display:flex; align-items:center; gap:12px;">
         <span id="user-display" class="mono" style="font-size:11px; color:var(--amber); display:none; border: 1px solid var(--amber-dim); padding: 4px 8px; border-radius: 4px; background: rgba(232,154,42,0.05)">Op: --</span>
+        <button id="btn-register-trigger" class="mono" onclick="openRegisterModal()" style="background:transparent; border:1px solid var(--amber); color:var(--amber); font-size:10px; padding: 5px 12px; border-radius: 4px; cursor:pointer; display:none; text-transform:uppercase; letter-spacing:0.05em;">Add Operator</button>
         <button id="btn-login-trigger" class="mono" onclick="openAuthModal()" style="background:transparent; border:1px solid var(--border); color:var(--text); font-size:10px; padding: 5px 12px; border-radius: 4px; cursor:pointer; text-transform:uppercase; letter-spacing:0.05em;">Login</button>
         <button id="btn-logout" class="mono" onclick="handleLogout()" style="background:transparent; border:1px solid var(--border); color:var(--muted); font-size:10px; padding: 5px 12px; border-radius: 4px; cursor:pointer; display:none; text-transform:uppercase; letter-spacing:0.05em;">Logout</button>
       </div>
@@ -931,9 +932,7 @@
           <input type="password" id="login-password" class="sensor-input" placeholder="Enter password">
         </div>
         <button class="btn-submit" onclick="submitLogin()" style="margin-top:16px">Login</button>
-        <div style="text-align:center; margin-top:12px; font-size:11px; color:var(--muted)">
-          No account? <a href="#" onclick="toggleAuthView(true); event.preventDefault();" style="color:var(--amber); text-decoration:none">Register here</a>
-        </div>
+        <!-- Public registration disabled. Account registration restricted to logged-in admins. -->
       </div>
 
       <div id="register-form-view" style="display:none">
@@ -951,9 +950,7 @@
           <input type="password" id="reg-password" class="sensor-input" placeholder="Min 6 characters">
         </div>
         <button class="btn-submit" onclick="submitRegister()" style="margin-top:16px">Register</button>
-        <div style="text-align:center; margin-top:12px; font-size:11px; color:var(--muted)">
-          Have account? <a href="#" onclick="toggleAuthView(false); event.preventDefault();" style="color:var(--amber); text-decoration:none">Login here</a>
-        </div>
+        <!-- Admin registration view -->
       </div>
     </div>
   </div>
@@ -989,6 +986,10 @@
 
     /* ── Image handling ───────────────────────────────────────────── */
     function handleImageSelect(file) {
+      if (!currentUser) {
+        showToast('Login required to perform image predictions', 'warning');
+        return;
+      }
       if (!file.type.startsWith('image/')) {
         showToast('Invalid file type — images only', 'danger');
         return;
@@ -1047,6 +1048,10 @@
 
     /* ── Sensor submission ────────────────────────────────────────── */
     function submitSensorReading() {
+      if (!currentUser) {
+        showToast('Login required to submit manual readings', 'warning');
+        return;
+      }
       const temp = parseFloat(document.getElementById('input-temp').value);
       const hum  = parseFloat(document.getElementById('input-humidity').value);
 
@@ -1059,7 +1064,7 @@
         return;
       }
 
-      fetch('/api/readings', {
+      fetch('/api/readings/manual', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ temperature: temp, humidity: hum })
@@ -1091,6 +1096,7 @@
 
     /* ── Data refresh ─────────────────────────────────────────────── */
     function updateReadings() {
+      if (!currentUser) return;
       fetch('/api/readings?limit=20')
         .then(r => {
           if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -1240,21 +1246,53 @@
     /* ── Authentication & Alerts Management ──────────────────────── */
     let currentUser = null;
 
+    function clearDashboardData() {
+      document.getElementById('temp-value').textContent = '--';
+      document.getElementById('humidity-value').textContent = '--';
+      document.getElementById('temp-time').textContent = 'No data';
+      document.getElementById('humidity-time').textContent = 'No data';
+      document.getElementById('stat-avg-temp').textContent = '--';
+      document.getElementById('stat-avg-humidity').textContent = '--';
+      document.getElementById('stat-avg-prob').textContent = '--';
+      document.getElementById('risk-label').textContent = 'LOW';
+      document.getElementById('risk-label').className = 'risk-level-text LOW';
+      document.getElementById('risk-pct').textContent = '0';
+      document.getElementById('risk-bar').style.width = '0%';
+      document.getElementById('risk-bar').className = 'bar-fill LOW';
+      document.getElementById('alerts-list').innerHTML = '<div class="empty-state">No active alerts</div>';
+      document.getElementById('readings-body').innerHTML = '<tr><td colspan="5" class="empty-state">No readings yet</td></tr>';
+      if (historyChart) {
+        historyChart.data.labels = [];
+        historyChart.data.datasets[0].data = [];
+        historyChart.data.datasets[1].data = [];
+        historyChart.update();
+      }
+    }
+
     function checkAuthStatus() {
       fetch('/api/auth/status')
         .then(r => r.json())
         .then(data => {
           if (data.logged_in) {
             currentUser = { username: data.username, role: data.role };
-            document.getElementById('user-display').textContent = `Op: ${data.username}`;
+            if (data.role === 'admin') {
+              document.getElementById('user-display').textContent = `Admin: ${data.username}`;
+              document.getElementById('btn-register-trigger').style.display = 'inline-block';
+            } else {
+              document.getElementById('user-display').textContent = `Op: ${data.username}`;
+              document.getElementById('btn-register-trigger').style.display = 'none';
+            }
             document.getElementById('user-display').style.display = 'inline-block';
             document.getElementById('btn-login-trigger').style.display = 'none';
             document.getElementById('btn-logout').style.display = 'inline-block';
+            updateReadings();
           } else {
             currentUser = null;
             document.getElementById('user-display').style.display = 'none';
+            document.getElementById('btn-register-trigger').style.display = 'none';
             document.getElementById('btn-login-trigger').style.display = 'inline-block';
             document.getElementById('btn-logout').style.display = 'none';
+            clearDashboardData();
           }
           // Refresh alerts list dynamically if user state changes
           updateAlerts();
@@ -1265,6 +1303,11 @@
     function openAuthModal() {
       document.getElementById('auth-modal').style.display = 'flex';
       toggleAuthView(false);
+    }
+
+    function openRegisterModal() {
+      document.getElementById('auth-modal').style.display = 'flex';
+      toggleAuthView(true);
     }
 
     function closeAuthModal() {
@@ -1361,6 +1404,7 @@
     }
 
     function updateAlerts() {
+      if (!currentUser) return;
       fetch('/api/alerts?limit=20')
         .then(r => {
           if (!r.ok) throw new Error(`HTTP ${r.status}`);

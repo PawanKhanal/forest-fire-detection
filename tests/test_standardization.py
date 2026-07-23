@@ -125,14 +125,14 @@ def test_user_and_alerts_operations():
     try:
         db_mgr = DatabaseManager(db_path)
         
-        # Test User Creation
+        # Test User Creation (ID 2 because ID 1 is the seeded default admin)
         user_id = db_mgr.create_user(
             username="testop",
             password_hash="hashedpassword123",
             email="testop@example.com",
             role="operator"
         )
-        assert user_id == 1
+        assert user_id == 2
         
         # Test Retrieve User
         user = db_mgr.get_user_by_username("testop")
@@ -175,3 +175,49 @@ def test_user_and_alerts_operations():
     finally:
         if os.path.exists(db_path):
             os.remove(db_path)
+
+def test_rbac_endpoints():
+    """Test RBAC enforcements on Flask API endpoints using the test client."""
+    from app import app
+    app.config['TESTING'] = True
+    
+    with app.test_client() as client:
+        # 1. Unauthenticated request to register should return 401
+        res = client.post('/api/auth/register', json={
+            'username': 'newop',
+            'password': 'password123'
+        })
+        assert res.status_code == 401
+        assert b"Authentication required" in res.data
+        
+        # 2. Unauthenticated request to resolve should return 401
+        res = client.post('/api/alerts/resolve', json={
+            'alert_id': 1
+        })
+        assert res.status_code == 401
+        assert b"Authentication required" in res.data
+        
+        # 3. Authenticate as operator and try to register (should return 403)
+        with client.session_transaction() as sess:
+            sess['username'] = 'operator1'
+            sess['role'] = 'operator'
+            
+        res = client.post('/api/auth/register', json={
+            'username': 'newop',
+            'password': 'password123'
+        })
+        assert res.status_code == 403
+        assert b"Unauthorized" in res.data
+        
+        # 4. Authenticate as admin and register (should return 200 or 400 if validation fails, but not 401 or 403)
+        with client.session_transaction() as sess:
+            sess['username'] = 'admin'
+            sess['role'] = 'admin'
+            
+        res = client.post('/api/auth/register', json={
+            'username': 'newop_test',
+            'password': 'password123',
+            'role': 'operator'
+        })
+        # If it returns 200/201 (or 400 "already exists"), it passed the auth check!
+        assert res.status_code in [200, 400]
